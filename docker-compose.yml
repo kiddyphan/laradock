@@ -5,6 +5,9 @@ networks:
     driver: ${NETWORKS_DRIVER}
   backend:
     driver: ${NETWORKS_DRIVER}
+    ipam:
+      config:
+      - subnet: 172.20.0.0/24
 
 volumes:
   mysql:
@@ -194,22 +197,64 @@ services:
     nginx:
       build:
         context: ./nginx
+        dockerfile: Dockerfile-master
         args:
           - PHP_UPSTREAM_CONTAINER=${NGINX_PHP_UPSTREAM_CONTAINER}
           - PHP_UPSTREAM_PORT=${NGINX_PHP_UPSTREAM_PORT}
           - CHANGE_SOURCE=${CHANGE_SOURCE}
+          - JS_UPSTREAM_CONTAINER=${DOCKER_HOST_IP}
+          - JS_UPSTREAM_PORT=${DOCKER_HOST_PORT}
       volumes:
         - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
         - ${NGINX_HOST_LOG_PATH}:/var/log/nginx
-        - ${NGINX_SITES_PATH}:/etc/nginx/sites-available
+        - ${NGINX_SITES_PATH}master/:/etc/nginx/sites-available
       ports:
         - "${NGINX_HOST_HTTP_PORT}:80"
         - "${NGINX_HOST_HTTPS_PORT}:443"
+      links:
+        - nginx_proxy1
+        - nginx_proxy2 
       depends_on:
         - php-fpm
       networks:
         - frontend
         - backend
+
+    nginx_proxy1:
+      build:
+        context: ./nginx
+        args:
+          - PHP_UPSTREAM_CONTAINER=${NGINX_PHP_UPSTREAM_CONTAINER}
+          - PHP_UPSTREAM_PORT=${NGINX_PHP_UPSTREAM_PORT}
+      volumes:
+        - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+        - ${NGINX_HOST_LOG_PATH}:/var/log/nginx
+        - ${NGINX_SITES_PATH}proxy1/:/etc/nginx/sites-available
+      ports:
+        - "8081:80"
+      depends_on:
+        - php-fpm
+      networks:
+        - frontend
+        - backend
+        
+    nginx_proxy2:
+      build:
+        context: ./nginx
+        args:
+          - PHP_UPSTREAM_CONTAINER=${NGINX_PHP_UPSTREAM_CONTAINER}
+          - PHP_UPSTREAM_PORT=${NGINX_PHP_UPSTREAM_PORT}
+      volumes:
+        - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+        - ${NGINX_HOST_LOG_PATH}:/var/log/nginx
+        - ${NGINX_SITES_PATH}proxy2/:/etc/nginx/sites-available
+      ports:
+        - "8082:80"
+      depends_on:
+        - php-fpm
+      networks:
+        - frontend
+        - backend  
 
 ### Blackfire ########################################
     blackfire:
@@ -287,10 +332,12 @@ services:
       volumes:
         - ${DATA_PATH_HOST}/mysql:/var/lib/mysql
         - ${MYSQL_ENTRYPOINT_INITDB}:/docker-entrypoint-initdb.d
+        - ./logs/mysql/:/var/log/mysql
       ports:
         - "${MYSQL_PORT}:3306"
       networks:
-        - backend
+          backend:
+              ipv4_address: 172.20.0.10
 
 ### Percona ################################################
     percona:
@@ -353,7 +400,8 @@ services:
         - POSTGRES_USER=${POSTGRES_USER}
         - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       networks:
-        - backend
+          backend:
+              ipv4_address: 172.20.0.13
 
 ### PostgreSQL PostGis ###################################
     postgres-postgis:
@@ -390,7 +438,8 @@ services:
       volumes:
         - ${DATA_PATH_HOST}/mongo:/data/db
       networks:
-        - backend
+          backend:
+              ipv4_address: 172.20.0.11
 
 ### RethinkDB ##############################################
     rethinkdb:
@@ -410,7 +459,8 @@ services:
       ports:
         - "${REDIS_PORT}:6379"
       networks:
-        - backend
+          backend:
+              ipv4_address: 172.20.0.12
 
 ### Aerospike ##########################################
     aerospike:
@@ -1266,3 +1316,17 @@ services:
         backend:
           aliases:
             - fetchmail
+
+### JUPYTER NOTEBOOK ################################################
+    jupyter:
+      build:
+        context: ./jupyter
+      environment: 
+        - LANGUAGE=en_US
+      volumes:
+        - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+        - ./jupyter/work:/home/jovyan/work
+      ports:
+        - 8888:8888
+      networks:
+        - backend
